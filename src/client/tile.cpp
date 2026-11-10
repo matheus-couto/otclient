@@ -186,7 +186,9 @@ void Tile::drawCreature(const MapPosInfo& mapRect, const Point& dest, const int 
     g_drawPool.setDrawOrder(DrawOrder::THIRD);
     for (const auto& creature : m_walkingCreatures) {
         // already drawn by this point
-        if (creature->getDirection() == Otc::Direction::NorthEast || creature->getDirection() == Otc::Direction::SouthWest)
+        // Crandoria: so no desenho; o passe de luz nao passa por Tile::draw, e pular aqui
+        // apagava a luz do personagem na 1a metade de cada passo NE/SW (tela preta no escuro)
+        if (flags != Otc::DrawLights && (creature->getDirection() == Otc::Direction::NorthEast || creature->getDirection() == Otc::Direction::SouthWest))
             if (creature->getLastStepToPosition() != getPosition())
                 continue;
 

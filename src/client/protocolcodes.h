@@ -88,6 +88,7 @@ namespace Proto
         GameServerFeatures = 67,
         GameServerFloorDescription = 75,
         GameServerTaskBoard = 91,
+        GameServerBossDifficultySelection = 47, // 15.30 (0x2F)
 
         // original tibia ONLY
         GameServerWeaponProficiencyExperience = 92,
@@ -95,6 +96,7 @@ namespace Proto
         GameServerPassiveCooldown = 94,
         GameServerOpenWheelWindow = 95, // 0x5F
         GameServerInventoryImbuements = 96,
+        GameServerSpellDataModification = 96, // 15.30: reaproveita o 0x60
         GameServerBosstiaryData = 97,
         GameServerBosstiarySlots = 98,
         GameServerSendClientCheck = 99,
@@ -186,6 +188,7 @@ namespace Proto
         GameServerBestiaryRefreshTracker = 185,
         GameServerTaskHuntingBasicData = 186, // SoulSealsWindow 1520
         GameServerTaskHuntingData = 187,
+        GameServerWeaponProficiencyReshapeOffers = 187, // 15.30: reaproveita o 0xBB
         GameServerBosstiaryCooldownTimer = 189,
         GameServerFloorChangeUp = 190,
         GameServerFloorChangeDown = 191,
@@ -194,6 +197,7 @@ namespace Proto
         GameServerCyclopediaHouseAuctionMessage = 195,
         GameServerWeaponProficiencyInfo = 196, // TournamentInformation = 196
         GameServerTournamentLeaderboard = 197, /* Unused */
+        GameServerGemAtelierGemRevealed = 197, // 15.30
         GameServerCyclopediaHousesInfo = 198,
         GameServerCyclopediaHouseList = 199,
         GameServerChooseOutfit = 200,

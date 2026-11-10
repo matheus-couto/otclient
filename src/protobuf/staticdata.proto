@@ -2,12 +2,19 @@ syntax = "proto2";
 
 package otclient.protobuf.staticdata;
 
+// 15.30: creature classes was inserted as field 2, shifting the others by one.
 message Staticdata {
 	repeated Creature monsters = 1;
-	repeated Achievement achievements = 2;
-	repeated House houses = 3;
-	repeated Creature bosses = 4;
-	repeated Quest quests = 5;
+	repeated CreatureClass creatureClasses = 2;
+	repeated Achievement achievements = 3;
+	repeated House houses = 4;
+	repeated Creature bosses = 5;
+	repeated Quest quests = 6;
+}
+
+message CreatureClass {
+	optional uint32 id = 1;
+	optional string name = 2;
 }
 
 message Outfit {

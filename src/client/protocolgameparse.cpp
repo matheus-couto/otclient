@@ -470,8 +470,21 @@ void ProtocolGame::parseMessage(const InputMessagePtr& msg)
                 case Proto::GameServerTaskHuntingBasicData:
                     parseTaskHuntingBasicData(msg);
                     break;
-                case Proto::GameServerTaskHuntingData:
-                    parseTaskHuntingData(msg);
+                case Proto::GameServerTaskHuntingData: // || Proto::GameServerWeaponProficiencyReshapeOffers
+                    if (g_game.getClientVersion() >= 1530) {
+                        parseWeaponProficiencyReshapeOffers(msg);
+                    } else {
+                        parseTaskHuntingData(msg);
+                    }
+                    break;
+                case Proto::GameServerSpellDataModification:
+                    parseSpellDataModification(msg);
+                    break;
+                case Proto::GameServerGemAtelierGemRevealed:
+                    parseGemAtelierGemRevealed(msg);
+                    break;
+                case Proto::GameServerBossDifficultySelection:
+                    parseBossDifficultySelection(msg);
                     break;
                 case Proto::GameServerBosstiaryCooldownTimer:
                     parseBosstiaryCooldownTimer(msg);
@@ -2149,6 +2162,26 @@ void ProtocolGame::parseItemClasses(const InputMessagePtr& msg)
             }
         }
 
+        if (g_game.getClientVersion() >= 1530) {
+            // 15.30: the forge constants are no longer sent, only the player's dust limit as
+            // steps of 20 above 100. The constants below are the server's config.lua values.
+            forgeConfig.maxDustLevel = 100 + msg->getU8() * 20;
+            forgeConfig.dustPercent = 20;
+            forgeConfig.dustToSliver = 3;
+            forgeConfig.sliverToCore = 50;
+            forgeConfig.dustPercentUpgrade = 75;
+            forgeConfig.maxDustCap = 225;
+            forgeConfig.normalDustFusion = 100;
+            forgeConfig.convergenceDustFusion = 130;
+            forgeConfig.normalDustTransfer = 100;
+            forgeConfig.convergenceDustTransfer = 160;
+            forgeConfig.fusionChanceBase = 50;
+            forgeConfig.fusionChanceImproved = 15;
+            forgeConfig.fusionReduceTierLoss = 50;
+            g_lua.callGlobalField("g_game", "forgeData", forgeConfig);
+            return;
+        }
+
         forgeConfig.dustPercent = msg->getU8();
         forgeConfig.dustToSliver = msg->getU8();
         forgeConfig.sliverToCore = msg->getU8();
@@ -2304,7 +2337,11 @@ void ProtocolGame::parseOpenForge(const InputMessagePtr& msg)
         }
         data.convergenceTransfers.emplace_back(transfer);
     }
-    data.dustLevel = msg->getU16();
+    if (g_game.getClientVersion() >= 1530) {
+        data.dustLevel = 100 + msg->getU8() * 20; // 15.30: steps of 20 above 100
+    } else {
+        data.dustLevel = msg->getU16();
+    }
 
     return g_lua.callGlobalField("g_game", "onOpenForge", data);
 }
@@ -2321,16 +2358,24 @@ void ProtocolGame::setCreatureVocation(const InputMessagePtr& msg, const uint32_
     creature->setVocation(vocationId);
 }
 
-void ProtocolGame::addCreatureIcon(const InputMessagePtr& msg, const uint32_t creatureId) const
+void ProtocolGame::readCreatureIcons(const InputMessagePtr& msg, std::vector<std::tuple<uint8_t, uint8_t, uint16_t>>& icons) const
 {
     const uint8_t sizeIcons = msg->getU8();
-    std::vector<std::tuple<uint8_t, uint8_t, uint16_t>> icons; // icon, category, count
     for (auto i = 0; i < sizeIcons; ++i) {
         const uint8_t icon = msg->getU8(); // icon.serialize()
         const uint8_t category = msg->getU8(); // icon.category -- 0x00 = monster // 0x01 = player?
         const uint16_t count = msg->getU16(); // icon.count
+        if (g_game.getClientVersion() >= 1530) {
+            msg->getU8(); // 15.30: new trailing per-icon byte (unknown)
+        }
         icons.emplace_back(icon, category, count);
     }
+}
+
+void ProtocolGame::addCreatureIcon(const InputMessagePtr& msg, const uint32_t creatureId) const
+{
+    std::vector<std::tuple<uint8_t, uint8_t, uint16_t>> icons; // icon, category, count
+    readCreatureIcons(msg, icons);
 
     const auto& creature = g_map.getCreatureById(creatureId);
     if (!creature) {
@@ -2821,6 +2866,9 @@ void ProtocolGame::parsePlayerState(const InputMessagePtr& msg) const
 void ProtocolGame::parsePlayerCancelAttack(const InputMessagePtr& msg)
 {
     const uint32_t seq = g_game.getFeature(Otc::GameAttackSeq) ? msg->getU32() : 0;
+    if (g_game.getClientVersion() >= 1530) {
+        msg->getU32(); // 15.30: second u32 (unknown, always 0)
+    }
     g_game.processAttackCancel(seq);
 }
 
@@ -3462,11 +3510,17 @@ void ProtocolGame::parseBestiaryOverview(const InputMessagePtr& msg)
 
     for (auto i = 0; i < raceSize; ++i) {
         const uint16_t raceId = msg->getU16();
+        if (g_game.getClientVersion() >= 1530) {
+            msg->getU8(); // 15.30: isLeaderKilled (Echo Warden badge)
+        }
         const uint8_t progress = msg->getU8();
         uint8_t occurrence = 0;
         uint16_t creatureAnimusMasteryBonus = 0;
         if (progress > 0) {
             occurrence = msg->getU8();
+            if (g_game.getClientVersion() >= 1530) {
+                msg->getU8(); // 15.30: unknown trailing byte
+            }
         }
         if (g_game.getClientVersion() >= 1340) {
             creatureAnimusMasteryBonus = msg->getU16(); // Creature Animous Bonus
@@ -3506,7 +3560,18 @@ void ProtocolGame::parseBestiaryMonsterData(const InputMessagePtr& msg)
     data.thirdDifficulty = msg->getU16();
     data.secondUnlock = msg->getU16();
     data.lastProgressKillCount = msg->getU16();
-    data.difficulty = msg->getU8();
+    if (g_game.getClientVersion() >= 1530) {
+        msg->getU8(); // 15.30: Echo Warden charm points earned (0 = none killed)
+        data.difficulty = msg->getU8();
+        if (data.currentLevel == 0) {
+            // 15.30: nothing past the difficulty while the creature is still locked
+            data.ocorrence = 0;
+            g_game.processUpdateBestiaryMonsterData(data);
+            return;
+        }
+    } else {
+        data.difficulty = msg->getU8();
+    }
     data.ocorrence = msg->getU8();
 
     const uint8_t lootCount = msg->getU8();
@@ -3644,10 +3709,11 @@ void ProtocolGame::parseAutomapFlag(const InputMessagePtr& msg)
     if (g_game.getClientVersion() >= 1200) {
         // Tibia 12+: 0xDD is the "Cyclopedia Map Data" packet family and carries a
         // subtype byte before the payload (Canary: CyclopediaMapData_t). The classic
-        // minimap marker is subtype 0 (MinimapMarker) — the only one Canary sends.
+        // minimap marker is subtype 0 (MinimapMarker).
         const uint8_t subtype = msg->getU8();
         if (subtype != 0) {
-            throw Exception("ProtocolGame::parseAutomapFlag: unhandled cyclopedia map data subtype {}", subtype);
+            parseCyclopediaMapData(msg, subtype);
+            return;
         }
     }
 
@@ -3660,6 +3726,58 @@ void ProtocolGame::parseAutomapFlag(const InputMessagePtr& msg)
         g_game.processAddAutomapFlag(pos, icon, description);
     } else {
         g_game.processRemoveAutomapFlag(pos, icon, description);
+    }
+}
+
+// 15.30: Cyclopedia map "Measuring Tibia" (discovery / donations). There is no UI for it
+// yet, so the payload is only consumed to keep the rest of the packet in sync.
+void ProtocolGame::parseCyclopediaMapData(const InputMessagePtr& msg, const uint8_t subtype)
+{
+    switch (subtype) {
+        case 1: { // DiscoveryData
+            const uint16_t mainAreas = msg->getU16();
+            for (auto i = 0; i < mainAreas; ++i) {
+                msg->getU16(); // area id
+                msg->getU8(); // status
+                msg->getU8(); // progress
+            }
+            const uint16_t discovered = msg->getU16();
+            for (auto i = 0; i < discovered; ++i) {
+                msg->getU16(); // sub area id
+            }
+            const uint16_t discoverable = msg->getU16();
+            for (auto i = 0; i < discoverable; ++i) {
+                msg->getU16(); // sub area id
+            }
+            break;
+        }
+        case 5: { // SetDiscoveryArea
+            msg->getU16(); // area id
+            msg->getU8(); // active
+            msg->getU8(); // points of interest target
+            const uint8_t points = msg->getU8();
+            for (auto i = 0; i < points; ++i) {
+                getPosition(msg);
+                msg->getU8(); // state
+            }
+            break;
+        }
+        case 9: { // Donations
+            msg->getU64(); // goal
+            const uint8_t areas = msg->getU8();
+            for (auto i = 0; i < areas; ++i) {
+                msg->getU16(); // area id
+                msg->getU8(); // improved respawn active
+                msg->getU64(); // donated amount
+            }
+            break;
+        }
+        case 10: // SetCurrentArea
+        case 11: // SetExploringArea
+            msg->getU16(); // area id
+            break;
+        default:
+            throw Exception("ProtocolGame::parseCyclopediaMapData: unhandled cyclopedia map data subtype {}", subtype);
     }
 }
 
@@ -4176,6 +4294,12 @@ CreaturePtr ProtocolGame::getCreature(const InputMessagePtr& msg, int type) cons
 
         if (g_game.getClientVersion() >= 1281) {
             addCreatureIcon(msg, creature->getId());
+        }
+
+        if (g_game.getClientVersion() >= 1530) {
+            // 15.30: second creature-icon list, only inline here (0x8B sends each list on its own)
+            std::vector<std::tuple<uint8_t, uint8_t, uint16_t>> secondIcons;
+            readCreatureIcons(msg, secondIcons);
         }
 
         const uint8_t skull = msg->getU8();
@@ -7166,6 +7290,12 @@ void ProtocolGame::parseClientEvent(const InputMessagePtr& msg)
             g_lua.callGlobalField("g_game", "onClientEvent", type, spellId);
             break;
         }
+        case Otc::CLIENT_EVENT_TYPE_LEADER_MONSTER: {
+            const auto raceId = msg->getU16();
+            const auto charmPoints = msg->getU32();
+            g_lua.callGlobalField("g_game", "onClientEvent", type, raceId, charmPoints);
+            break;
+        }
         default:
             g_logger.warning(std::format("[ProtocolGame::parseClientEvent] Unknown event type {}", static_cast<uint8_t>(type)));
             break;
@@ -7339,6 +7469,16 @@ void ProtocolGame::parseWeaponProficiencyInfo(const InputMessagePtr& msg)
         const uint8_t perkPosition = msg->getU8();
         perks.push_back({ level, perkPosition });
     }
+    if (g_game.getClientVersion() >= 1530) {
+        // 15.30: modified slots (dust-rolled perks) after the active perks
+        const uint8_t modifiedCount = msg->getU8();
+        for (int i = 0; i < modifiedCount; ++i) {
+            msg->getU8(); // level
+            msg->getU8(); // position
+            msg->getU16(); // perk type (catalogue index)
+            msg->getU8(); // rank
+        }
+    }
     constexpr uint16_t MarketCategoryWeaponsAll = 32;
     uint16_t marketCategory = MarketCategoryWeaponsAll;
     if (g_things.isValidDatId(itemId, ThingCategoryItem)) {
@@ -7351,6 +7491,64 @@ void ProtocolGame::parseWeaponProficiencyInfo(const InputMessagePtr& msg)
         }
     }
     g_lua.callGlobalField("g_game", "onWeaponProficiency", itemId, experience, perks, marketCategory);
+}
+
+// 15.30 packets without a UI in the client yet: consumed so the rest of the message stays in sync.
+
+// 0xBB - weapon proficiency reshape offers
+void ProtocolGame::parseWeaponProficiencyReshapeOffers(const InputMessagePtr& msg)
+{
+    msg->getU16(); // item id
+    msg->getU8(); // slot level
+    msg->getU8(); // slot position
+    const uint8_t offers = msg->getU8();
+    for (auto i = 0; i < offers; ++i) {
+        msg->getU16(); // perk type
+        msg->getU8(); // rank
+    }
+}
+
+// 0x60 - wheel spell data modification
+void ProtocolGame::parseSpellDataModification(const InputMessagePtr& msg)
+{
+    const uint16_t count = msg->getU16();
+    for (auto i = 0; i < count; ++i) {
+        msg->getU16(); // spell id
+        msg->getU8(); // modification
+        msg->getU32(); // value
+    }
+}
+
+// 0xC5 - gem atelier gem revealed
+void ProtocolGame::parseGemAtelierGemRevealed(const InputMessagePtr& msg)
+{
+    msg->getU32(); // gem index
+}
+
+// 0x2F - boss difficulty selection (discriminator 1 closes the window)
+void ProtocolGame::parseBossDifficultySelection(const InputMessagePtr& msg)
+{
+    if (msg->getU8() == 1) {
+        return;
+    }
+
+    msg->getU32();
+    msg->getU8();
+    msg->getU16(); // race id
+    msg->getU16();
+    msg->getU16(); // highest in group
+    msg->getU16(); // personal highest
+    msg->getU32(); // bad luck
+    for (auto i = 0; i < 5; ++i) {
+        msg->getString(); // banners
+    }
+    msg->getU16();
+    for (auto list = 0; list < 2; ++list) { // red and green modifiers
+        const uint8_t count = msg->getU8();
+        for (auto i = 0; i < count; ++i) {
+            msg->getString();
+        }
+    }
 }
 
 // 0x5F - parse destiny wheel window

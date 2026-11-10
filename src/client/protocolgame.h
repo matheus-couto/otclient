@@ -431,6 +431,12 @@ private:
     // 15x
     void parseWeaponProficiencyExperience(const InputMessagePtr& msg);
     void parseWeaponProficiencyInfo(const InputMessagePtr& msg);
+    void parseWeaponProficiencyReshapeOffers(const InputMessagePtr& msg);
+    void parseSpellDataModification(const InputMessagePtr& msg);
+    void parseGemAtelierGemRevealed(const InputMessagePtr& msg);
+    void parseBossDifficultySelection(const InputMessagePtr& msg);
+    void parseCyclopediaMapData(const InputMessagePtr& msg, uint8_t subtype);
+    void readCreatureIcons(const InputMessagePtr& msg, std::vector<std::tuple<uint8_t, uint8_t, uint16_t>>& icons) const;
 
     // 15.2x
     void parseTaskBoardData(const InputMessagePtr& msg);
